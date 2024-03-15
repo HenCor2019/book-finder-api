@@ -3,6 +3,15 @@ phases:
   pre_build:
     commands:
       - echo Logging in to Amazon ECR....
+      - BRANCH=$(echo $CODEBUILD_WEBHOOK_HEAD_REF | cut -d/ -f3)
+      - |
+        if [ "$BRANCH_NAME" = "main" ]; then
+          IMAGE_TAG="prd-${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+        elif [ "$BRANCH_NAME" = "develop" ]; then
+          IMAGE_TAG="dev-${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+        else
+          IMAGE_TAG="other-${CODEBUILD_RESOLVED_SOURCE_VERSION}"
+        fi;
       - aws --version
       - aws ecr get-login-password --region $AWS_REGION \
         | docker login \
@@ -11,10 +20,17 @@ phases:
   build:
     commands:
       - echo Build started on `date`
-      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$AWS_REPOSITORY_NAME
-      - IMAGE_TAG=build-$(echo $CODEBUILD_BUILD_ID | awk -F":" '{print $2}')
+      - |
+        if [ "$BRANCH_NAME" = "main" ]; then
+          REPOSITORY_NAME="$PRD_REPOSITORY_NAME"
+        elif [ "$BRANCH_NAME" = "develop" ]; then
+          REPOSITORY_NAME="$DEV_REPOSITORY_NAME"
+        else
+          REPOSITORY_NAME="$DEV_REPOSITORY_NAME"
+        fi;
+      - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$REPOSITORY_NAME
       - echo Building the Docker image...
-      - docker build -t $REPOSITORY_URI:latest . --target final
+      - docker build -t $REPOSITORY_URI:latest .
       - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
   post_build:
     commands:
@@ -24,7 +40,7 @@ phases:
       - docker push $REPOSITORY_URI:$IMAGE_TAG
       - echo Writing image definitions file...
       - DOCKER_CONTAINER_NAME=golang-pipeline-aws
-      - printf '[{"name":"%s","golang-pipeline-aws":"%s"}]' \
+      - printf '[{"name":"%s","book-finder-api":"%s"}]' \
         $DOCKER_CONTAINER_NAME \
         $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
       - echo $DOCKER_CONTAINER_NAME
